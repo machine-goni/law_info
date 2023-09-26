@@ -1,0 +1,8 @@
+__pycache__/
+csvs/
+documents/
+ask_questions.py
+Cloudtype.txt
+json_test.py
+langchain_test.py
+stream_lit.py

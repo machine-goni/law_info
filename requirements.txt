@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pydantic
+langchain
+pinecone-client
+tiktoken
+openai
+pycryptodome
