@@ -60,8 +60,9 @@ class AskQuestionsRerank:
         # 판례의 특성상 내용이 많아 잘게 쪼갤경우 판례의 내용과 결론이 쪼개겨 엉뚱한 답을 낼 가능성이 있어 chunk size 를 4000 으로 하였다.
         # 따라서 token 제한을 피하기 위해 gpt-3.5-turbo-16k 를 쓰려했으나 rerank 는 문서마다 따로 호출하여 답변을 얻는 것이기 때문에
         # 굳이 2배 비싼 16k 를 쓸 필요는 없어 보인다. 그래서 그냥 gpt-3.5-turbo 를 쓴다.
-        self.llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.0, openai_api_key=self.openai_key)
-        #self.llm = ChatOpenAI(model="gpt-3.5-turbo-16k", temperature=0.0, openai_api_key=self.openai_key)
+        # 위와 같은 이유로 gpt-3.5-turbo 쓰려고 했으나 rerank 특성상 붙는 few shot 등 때문에 4096 토큰을 넘는 경우가 생겨 gpt-3.5-turbo-16k 를 사용.
+        #self.llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.0, openai_api_key=self.openai_key)
+        self.llm = ChatOpenAI(model="gpt-3.5-turbo-16k", temperature=0.0, openai_api_key=self.openai_key)
     
 
     def ask_first(self, query):
