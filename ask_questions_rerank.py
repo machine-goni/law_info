@@ -33,6 +33,7 @@ from langchain.chains.question_answering import load_qa_chain
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 import base64
+import time
 
 
 
@@ -59,22 +60,46 @@ class AskQuestionsRerank:
     
         # 판례의 특성상 내용이 많아 잘게 쪼갤경우 판례의 내용과 결론이 쪼개겨 엉뚱한 답을 낼 가능성이 있어 chunk size 를 4000 으로 하였다.
         # 따라서 token 제한을 피하기 위해 gpt-3.5-turbo-16k 를 쓰려했으나 rerank 는 문서마다 따로 호출하여 답변을 얻는 것이기 때문에
-        # 굳이 2배 비싼 16k 를 쓸 필요는 없어 보인다. 그래서 그냥 gpt-3.5-turbo 를 쓴다.
-        # 위와 같은 이유로 gpt-3.5-turbo 쓰려고 했으나 rerank 특성상 붙는 few shot 등 때문에 4096 토큰을 넘는 경우가 생겨 gpt-3.5-turbo-16k 를 사용.
-        #self.llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.0, openai_api_key=self.openai_key)
-        self.llm = ChatOpenAI(model="gpt-3.5-turbo-16k", temperature=0.0, openai_api_key=self.openai_key)
+        # 굳이 2배 비싼 16k 를 쓸 필요는 없어 보인다. 그래서 그냥 gpt-3.5-turbo 를 쓴다.        
+        self.llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.0, openai_api_key=self.openai_key)
+        #self.llm = ChatOpenAI(model="gpt-3.5-turbo-16k", temperature=0.0, openai_api_key=self.openai_key)
     
 
     def ask_first(self, query):
+
+        # exception 이 나서 보여줄께 없을땐 그냥 retriever 가 찾아낸 결과라도 보여주기 위해
+        retriever_case_no_list = []
+        retriever_url_list = []    
             
         try:             
             nearest_k = 3            
             self.retriever = self.vectorstore.as_retriever(search_type="similarity", search_kwargs={"k":nearest_k})                         
             
+                     
             # llm 으로 보내서 rerank 를 하기위해 retriever 로 문서를 추려낸다. 
-            relevant_docs = self.retriever.get_relevant_documents(query)            
-            #for relevant_doc in relevant_docs:
-            #    print(f"No: {relevant_doc.metadata['source']}, Name: {relevant_doc.metadata['case_no']}")  
+            doc_max_len = 3970
+            prompt_len = 330
+            completion_len = 300
+            doc_length_limit = doc_max_len - prompt_len - completion_len    # 이 이상의 길이는 참조 문서에서 앞에서부터 자른다. 안그럼 토큰오바로 에러난다.
+            
+            # retriever 검색
+            relevant_docs = self.retriever.get_relevant_documents(query)
+
+            for relevant_doc in relevant_docs:
+                # 자르기 전
+                #print(f"No: {relevant_doc.metadata['source']}, Name: {relevant_doc.metadata['case_no']}")                  
+                #print(relevant_doc.page_content)
+
+                retriever_case_no_list.append(relevant_doc.metadata['case_no'])
+                retriever_url_list.append(f"https://www.law.go.kr/DRF/lawService.do?OC=xivaroma&target=prec&ID={relevant_doc.metadata['source']}&type=html")
+
+                relevant_doc.page_content = relevant_doc.page_content.replace("<br/>", "")
+                if len(relevant_doc.page_content) > doc_length_limit:                    
+                    need_cut_len = len(relevant_doc.page_content) - doc_length_limit                    
+                    new_page_content = relevant_doc.page_content[need_cut_len:]
+                    #print(f"new_page_content length: {len(new_page_content)}")
+                    #print(new_page_content)
+                    relevant_doc.page_content = new_page_content
             
             # create chain
             map_rerank_chain = load_qa_chain(
@@ -85,12 +110,16 @@ class AskQuestionsRerank:
             )
 
             # 추려낸 문서를 input_documents 에 넣어준다. llm 의 호출수는 input_documents 수 만큼 늘어난다. 
-            response = map_rerank_chain({'input_documents':relevant_docs, 'question':query})            
+            # 종종 영어로 답변하는 경우가 있어서 넣어준다. custom prompt 는 rerank 에선 쓸 수 없기때문에 question 에 붙여준다.
+            # 주의 할 점은 질문의 맨 앞에 붙여줘야 유효하고 retriever 가 검색을 끝마친 후 llm 에게 보내기 직전에 붙여준다.         
+            to_korean = f'한국어로 답해라. '
+            response = map_rerank_chain({'input_documents':relevant_docs, 'question':f'{to_korean}{query}'})
             
             # score 로 반환할 답변을 거른다
-            cut_line = 70
+            cut_line = 0   #70  #무조건 답변이 나오도록 점수를 낮춘다. 대신 낮은 점수는 낮은 관련도라고 알려주도록 한다.
             rslt_case_no_list = []
             rslt_url_list = []
+            rslt_score_list = []
             rslt_answer_list = []
             rslt_final_answer = ''
 
@@ -104,6 +133,7 @@ class AskQuestionsRerank:
                         if int(score) >= cut_line:
                             rslt_case_no_list.append(relevant_docs[i].metadata['case_no'])
                             rslt_url_list.append(f"https://www.law.go.kr/DRF/lawService.do?OC=xivaroma&target=prec&ID={relevant_docs[i].metadata['source']}&type=html")
+                            rslt_score_list.append(score)
 
                             if 'answer' in res:
                                 answer = res['answer']
@@ -120,6 +150,7 @@ class AskQuestionsRerank:
             json_data = {}
             json_data["cases"] = rslt_case_no_list
             json_data["urls"] = rslt_url_list
+            json_data["scores"] = rslt_score_list
             json_data["answers"] = rslt_answer_list
             json_data["final_answer"] = rslt_final_answer   
 
@@ -129,22 +160,26 @@ class AskQuestionsRerank:
                 print(f'case {i}:')
                 print(f'case no: {rslt_case_no_list[i]}')
                 print(f'url: {rslt_url_list[i]}')
+                print(f'score: {rslt_score_list[i]}')
                 print(f'answers: {rslt_answer_list[i]}')
                 print('\n')
 
             print(f'final answer: {rslt_final_answer}')
             """
 
-            return json.dumps(json_data)
+            #now = time
+            #print(f"현재: {now.localtime().tm_mon}월{now.localtime().tm_mday}일 {now.localtime().tm_hour}:{now.localtime().tm_min}")
             #print(response)
-            #return response                                    
-            
+            return json.dumps(json_data)
+                                    
 
         except Exception as e:
-            print("Exception!!:" + str(e))            
+            print("Exception!!:" + str(e)) 
             
             json_data = {}
-            json_data["final_answer"] = "Exception!!:" + str(e)
+            json_data["Exception"] = str(e)
+            json_data["cases"] = retriever_case_no_list
+            json_data["urls"] = retriever_url_list
 
             # json 형식으로 보내기 위해 json.dumps 를 사용해 dictionary 를 json 으로 변환
             #return json.dumps(json_data)
