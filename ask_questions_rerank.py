@@ -76,8 +76,9 @@ class AskQuestionsRerank:
         retriever_case_no_list = []
         retriever_url_list = []    
             
-        try:             
-            nearest_k = 3            
+        try:      
+            # 원래 3개를 찾았는데 ChatGPT 속도가 느려져서 rerank 로 3개를 찾으면 cloudtype 에서 timeout 이 걸려버린다.       
+            nearest_k = 2   #3
             self.retriever = self.vectorstore.as_retriever(search_type="similarity", search_kwargs={"k":nearest_k})                         
             
                      
