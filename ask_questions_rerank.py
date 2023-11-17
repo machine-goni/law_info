@@ -63,11 +63,17 @@ class AskQuestionsRerank:
         # 굳이 2배 비싼 16k 를 쓸 필요는 없어 보인다. 그래서 그냥 gpt-3.5-turbo 를 쓴다. 
         # 위의 이유로 gpt-3.5-turbo 로 초반 사용했으나 completion 의 길이가 문제가 되어 답변이 잘려 파싱에러로 이어지는 경우가 꽤 생긴다.
         # 감안해서 본문을 더 많이 자르면 되지만 퀄리티의 문제를 고려 안할 수 없기 때문에 일단 16k 를 쓰고 상황을 봐서 4k 로 돌아갈지 결정한다.
+        # 오픈AI 블로그(openai.com/blog) 에 따르면 23.12.11 부로 gpt-3.5-turbo-1106 이 gpt-3.5-turbo 로 자동업그레이드되고 
+        # gpt-3.5-turbo-0613 및 gpt-3.5-turbo-16k-0613 는 명시적으로 모델명을 적어야하며, 24.06.13 까지만 사용가능하다고 한다.
+        # 23.11.17 일 현재 gpt-3.5-turbo-1106 가 개똥같은 성능으로 물어보면 다 모른다고 하기때문에 0613 버전을 당분간 계속 사용하기 위해 명시해준다.
+        # 24.06.13 전에 1106 버전을 사용할지, 아니면 해당기능을 뺄지 결정해서 수정해야 한다.
         self.model_type = 1     # 0: "gpt-3.5-turbo", 1: "gpt-3.5-turbo-16k"
         if self.model_type == 1:
-            self.llm = ChatOpenAI(model="gpt-3.5-turbo-16k", temperature=0.0, openai_api_key=self.openai_key)
+            #self.llm = ChatOpenAI(model="gpt-3.5-turbo-16k", temperature=0.0, openai_api_key=self.openai_key)
+            self.llm = ChatOpenAI(model="gpt-3.5-turbo-16k-0613", temperature=0.0, openai_api_key=self.openai_key)
         else :
-            self.llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.0, openai_api_key=self.openai_key)
+            #self.llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.0, openai_api_key=self.openai_key)
+            self.llm = ChatOpenAI(model="gpt-3.5-turbo-0613", temperature=0.0, openai_api_key=self.openai_key)
     
 
     def ask_first(self, query):
