@@ -25,11 +25,14 @@ ConversationalRetrievalChain 에서 chain_type = "map_rerank" 로 사용할 순 
 
 import os
 import json
-import pinecone
-from langchain.vectorstores import Pinecone
-from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.chat_models import ChatOpenAI
+from pinecone import Pinecone, ServerlessSpec
+#from langchain.vectorstores import Pinecone
+from langchain_community.vectorstores import Pinecone as PineconeVectorStore
+#from langchain.embeddings.openai import OpenAIEmbeddings
+#from langchain.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain.chains.question_answering import load_qa_chain
+from langchain.callbacks import get_openai_callback
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 import base64
@@ -37,8 +40,10 @@ import time
 
 
 
-PINECONE_API_ENV = os.environ.get('PINECONE_API_ENV', 'us-west4-gcp-free')
-INDEX_NAME = "law-info-precedents-under-3970"
+#PINECONE_API_ENV = os.environ.get('PINECONE_API_ENV', 'us-west4-gcp-free')
+PINECONE_API_ENV = os.environ.get('PINECONE_API_ENV','gcp-starter')
+os.environ['PINECONE_API_ENV'] = PINECONE_API_ENV
+INDEX_NAME = "law-info-precedents"
 sk = 'rkskekfkakqktkdmgpdmgpdmgpgw2950'
 
 
@@ -47,33 +52,27 @@ class AskQuestionsRerank:
     
     def __init__(self, openai_key, pinecone_key):
         self.openai_key = decrypt(sk, openai_key)
-        self.pinecone_key = decrypt(sk, pinecone_key)        
+        #self.pinecone_key = decrypt(sk, pinecone_key)
+        PINECONE_API_KEY = os.environ.get('PINECONE_API_KEY', decrypt(sk, pinecone_key))
+        os.environ['PINECONE_API_KEY'] = PINECONE_API_KEY
 
         # create embedding instance
         self.embeddings = OpenAIEmbeddings(openai_api_key=self.openai_key)
 
         # initialize pinecone
-        pinecone.init(api_key=self.pinecone_key, environment=PINECONE_API_ENV)
+        #pinecone.init(api_key=self.pinecone_key, environment=PINECONE_API_ENV)
+        pc = Pinecone(api_key=PINECONE_API_KEY)
+        #pc_index = pc.Index(INDEX_NAME)
 
         # 이미 문서를 임베딩해서 pinecone vector store 에 넣었다면 거기에서 끌어다 쓰면 된다
-        self.vectorstore = Pinecone.from_existing_index(INDEX_NAME, self.embeddings)
+        #self.vectorstore = Pinecone.from_existing_index(INDEX_NAME, self.embeddings)
+        self.vectorstore = PineconeVectorStore.from_existing_index(INDEX_NAME, self.embeddings)
     
-        # 판례의 특성상 내용이 많아 잘게 쪼갤경우 판례의 내용과 결론이 쪼개겨 엉뚱한 답을 낼 가능성이 있어 chunk size 를 4000 으로 하였다.
-        # 따라서 token 제한을 피하기 위해 gpt-3.5-turbo-16k 를 쓰려했으나 rerank 는 문서마다 따로 호출하여 답변을 얻는 것이기 때문에
-        # 굳이 2배 비싼 16k 를 쓸 필요는 없어 보인다. 그래서 그냥 gpt-3.5-turbo 를 쓴다. 
-        # 위의 이유로 gpt-3.5-turbo 로 초반 사용했으나 completion 의 길이가 문제가 되어 답변이 잘려 파싱에러로 이어지는 경우가 꽤 생긴다.
-        # 감안해서 본문을 더 많이 자르면 되지만 퀄리티의 문제를 고려 안할 수 없기 때문에 일단 16k 를 쓰고 상황을 봐서 4k 로 돌아갈지 결정한다.
-        # 오픈AI 블로그(openai.com/blog) 에 따르면 23.12.11 부로 gpt-3.5-turbo-1106 이 gpt-3.5-turbo 로 자동업그레이드되고 
-        # gpt-3.5-turbo-0613 및 gpt-3.5-turbo-16k-0613 는 명시적으로 모델명을 적어야하며, 24.06.13 까지만 사용가능하다고 한다.
-        # 23.11.17 일 현재 gpt-3.5-turbo-1106 가 개똥같은 성능으로 물어보면 다 모른다고 하기때문에 0613 버전을 당분간 계속 사용하기 위해 명시해준다.
-        # 24.06.13 전에 1106 버전을 사용할지, 아니면 해당기능을 뺄지 결정해서 수정해야 한다.
-        self.model_type = 1     # 0: "gpt-3.5-turbo", 1: "gpt-3.5-turbo-16k"
-        if self.model_type == 1:
-            #self.llm = ChatOpenAI(model="gpt-3.5-turbo-16k", temperature=0.0, openai_api_key=self.openai_key)
-            self.llm = ChatOpenAI(model="gpt-3.5-turbo-16k-0613", temperature=0.0, openai_api_key=self.openai_key)
+        self.model_type = 0
+        if self.model_type == 0:
+            self.llm = ChatOpenAI(model="gpt-4-turbo", temperature=0.1, api_key=self.openai_key)
         else :
-            #self.llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.0, openai_api_key=self.openai_key)
-            self.llm = ChatOpenAI(model="gpt-3.5-turbo-0613", temperature=0.0, openai_api_key=self.openai_key)
+            self.llm = ChatOpenAI(model="gpt-3.5-turbo-0125", temperature=0.1, api_key=self.openai_key)
     
 
     def ask_first(self, query):
@@ -87,19 +86,23 @@ class AskQuestionsRerank:
             nearest_k = 2   #3
             self.retriever = self.vectorstore.as_retriever(search_type="similarity", search_kwargs={"k":nearest_k})                         
             
-                     
+            
             # llm 으로 보내서 rerank 를 하기위해 retriever 로 문서를 추려낸다. 
+            
+            '''
             doc_max_len = 3970
             prompt_len = 330
             completion_len = 350
-
+            
             if self.model_type == 1:    # 3.5 turbo 16k model
                 doc_length_limit = 12000
             else :                      # 3.5 turbo 4k model
                 doc_length_limit = doc_max_len - prompt_len - completion_len    # 이 이상의 길이는 참조 문서에서 앞에서부터 자른다. 안그럼 토큰오바로 에러난다.
+            '''
             
             # retriever 검색
-            relevant_docs = self.retriever.get_relevant_documents(query)
+            #relevant_docs = self.retriever.get_relevant_documents(query)
+            relevant_docs = self.retriever.invoke(query)
 
             for relevant_doc in relevant_docs:
                 # 자르기 전
@@ -110,12 +113,14 @@ class AskQuestionsRerank:
                 retriever_url_list.append(f"https://www.law.go.kr/DRF/lawService.do?OC=xivaroma&target=prec&ID={relevant_doc.metadata['source']}&type=html")
 
                 relevant_doc.page_content = relevant_doc.page_content.replace("<br/>", "")
+                '''
                 if len(relevant_doc.page_content) > doc_length_limit:                    
                     need_cut_len = len(relevant_doc.page_content) - doc_length_limit                    
                     new_page_content = relevant_doc.page_content[need_cut_len:]
                     #print(f"new_page_content length: {len(new_page_content)}")
                     #print(f"new_page_content : {new_page_content}")
                     relevant_doc.page_content = new_page_content
+                '''
             
             # create chain
             map_rerank_chain = load_qa_chain(
@@ -129,7 +134,16 @@ class AskQuestionsRerank:
             # 종종 영어로 답변하는 경우가 있어서 넣어준다. custom prompt 는 rerank 에선 쓸 수 없기때문에 question 에 붙여준다.
             # 주의 할 점은 질문의 맨 앞에 붙여줘야 유효하고 retriever 가 검색을 끝마친 후 llm 에게 보내기 직전에 붙여준다.         
             to_korean = f'한국어로 답해라. '
-            response = map_rerank_chain({'input_documents':relevant_docs, 'question':f'{to_korean}{query}'})
+            #response = map_rerank_chain({'input_documents':relevant_docs, 'question':f'{to_korean}{query}'})
+            #response = map_rerank_chain.invoke({'input_documents':relevant_docs, 'question':f'{to_korean}{query}'})
+            
+            # Track token usage for specific calls.
+            # It is currently only implemented for the OpenAI API.
+            with get_openai_callback() as cb:
+                response = map_rerank_chain.invoke({'input_documents':relevant_docs, 'question':f'{to_korean}{query}'})
+                #print("result:", response)
+                #print("---" * 10)
+                #print(cb)
             
             # score 로 반환할 답변을 거른다
             cut_line = 0   #70  #무조건 답변이 나오도록 점수를 낮춘다. 대신 낮은 점수는 낮은 관련도라고 알려주도록 한다.
