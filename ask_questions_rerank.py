@@ -68,8 +68,13 @@ class AskQuestionsRerank:
         #self.vectorstore = Pinecone.from_existing_index(INDEX_NAME, self.embeddings)
         self.vectorstore = PineconeVectorStore.from_existing_index(INDEX_NAME, self.embeddings)
     
-        self.model_type = 0
+        # 현재는 gpt-4-turbo 적용. gpt-4-turbo 는 gpt-4 의 1/3 가격이고, gpt-4o 는 gpt-4-turbo 의 1/2 가격이다(gpt-4 의 1/6).
+        # gpt-4o 앞으로는 gpt-4o 를 적용할 계획이지만 현재는 아직 안정화되지 않았는지 답변을 제대로 내놓지 못하고 있다.
+        # 추후 안정화 상태를 봐서 gpt-4o 를 적용하자.
+        self.model_type = 1
         if self.model_type == 0:
+            self.llm = ChatOpenAI(model="gpt-4o", temperature=0.1, api_key=self.openai_key)
+        elif self.model_type == 1:
             self.llm = ChatOpenAI(model="gpt-4-turbo", temperature=0.1, api_key=self.openai_key)
         else :
             self.llm = ChatOpenAI(model="gpt-3.5-turbo-0125", temperature=0.1, api_key=self.openai_key)
